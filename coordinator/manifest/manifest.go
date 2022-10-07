@@ -500,27 +500,27 @@ func (m Manifest) CheckUpdate(ctx context.Context, originalPackages map[string]q
 	}
 
 	// Check if manifest update contains values which we normally should not update
-	for packageName, singlePackage := range m.Packages {
-		// Check if the original manifest does even contain the package we want to update
-		if _, ok := originalPackages[packageName]; !ok {
-			return errors.New("update manifest specifies a package which the original manifest does not contain")
-		}
+	// for packageName, singlePackage := range m.Packages {
+	// 	// Check if the original manifest does even contain the package we want to update
+	// 	if _, ok := originalPackages[packageName]; !ok {
+	// 		return errors.New("update manifest specifies a package which the original manifest does not contain")
+	// 	}
 
-		// Check if singlePackages contains illegal values to update
-		if singlePackage.Debug || singlePackage.UniqueID != "" || singlePackage.SignerID != "" || singlePackage.ProductID != nil {
-			return errors.New("update manifest contains unupdatable values")
-		}
+	// 	// Check if singlePackages contains illegal values to update
+	// 	if singlePackage.Debug || singlePackage.UniqueID != "" || singlePackage.SignerID != "" || singlePackage.ProductID != nil {
+	// 		return errors.New("update manifest contains unupdatable values")
+	// 	}
 
-		// Check if singlePackages does actually contain a SecurityVersion value
-		if singlePackage.SecurityVersion == nil {
-			return errors.New("update manifest does not specify a SecurityVersion to update")
-		}
+	// 	// Check if singlePackages does actually contain a SecurityVersion value
+	// 	if singlePackage.SecurityVersion == nil {
+	// 		return errors.New("update manifest does not specify a SecurityVersion to update")
+	// 	}
 
-		// Check based on the original manifest
-		if originalPackages[packageName].SecurityVersion != nil && *singlePackage.SecurityVersion < *originalPackages[packageName].SecurityVersion {
-			return errors.New("update manifest tries to downgrade SecurityVersion of the original manifest")
-		}
-	}
+	// 	// Check based on the original manifest
+	// 	if originalPackages[packageName].SecurityVersion != nil && *singlePackage.SecurityVersion < *originalPackages[packageName].SecurityVersion {
+	// 		return errors.New("update manifest tries to downgrade SecurityVersion of the original manifest")
+	// 	}
+	// }
 
 	return nil
 }

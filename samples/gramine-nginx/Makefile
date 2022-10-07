@@ -13,7 +13,7 @@
 THIS_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 
 ARCH_LIBDIR ?= /lib/$(shell $(CC) -dumpmachine)
-GRAMINEDIR ?= $(HOME)/gramine
+GRAMINEDIR ?= $(HOME)/projects/gramine
 
 INSTALL_DIR ?= $(THIS_DIR)install
 NGINX_SRC ?= $(THIS_DIR)nginx-1.16.1

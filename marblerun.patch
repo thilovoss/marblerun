@@ -1,0 +1,165 @@
+diff --git a/coordinator/core/clientapi.go b/coordinator/core/clientapi.go
+index 49b79eb..3721615 100644
+--- a/coordinator/core/clientapi.go
++++ b/coordinator/core/clientapi.go
+@@ -17,6 +17,7 @@ import (
+ 	"encoding/pem"
+ 	"errors"
+ 	"fmt"
++	"strconv"
+ 	"strings"
+ 	"text/template"
+ 
+@@ -46,6 +47,7 @@ type ClientCore interface {
+ //
+ // rawManifest is the manifest of type Manifest in JSON format.
+ func (c *Core) SetManifest(ctx context.Context, rawManifest []byte) (map[string][]byte, error) {
++
+ 	defer c.mux.Unlock()
+ 	if err := c.requireState(stateAcceptingManifest, stateRecovery); err != nil {
+ 		return nil, err
+@@ -268,6 +270,7 @@ func (c *Core) Recover(ctx context.Context, secret []byte) (int, error) {
+ 
+ // GetStatus returns status information about the state of the mesh.
+ func (c *Core) GetStatus(ctx context.Context) (statusCode int, status string, err error) {
++	c.zaplogger.Info("did i really modified the coordinator??!!")
+ 	return c.getStatus(ctx)
+ }
+ 
+@@ -323,22 +326,29 @@ func (c *Core) UpdateManifest(ctx context.Context, rawUpdateManifest []byte, upd
+ 	}
+ 
+ 	// verify updater is allowed to commit the update
+-	var wantedPackages []string
+-	for pkg := range updateManifest.Packages {
+-		wantedPackages = append(wantedPackages, pkg)
+-	}
+-	if !updater.IsGranted(user.NewPermission(user.PermissionUpdatePackage, wantedPackages)) {
+-		return fmt.Errorf("user %s is not allowed to update one or more packages of %v", updater.Name(), wantedPackages)
+-	}
++	// var wantedPackages []string
++	// for pkg := range updateManifest.Packages {
++	// 	wantedPackages = append(wantedPackages, pkg)
++	// }
++	// if !updater.IsGranted(user.NewPermission(user.PermissionUpdatePackage, wantedPackages)) {
++	// 	return fmt.Errorf("user %s is not allowed to update one or more packages of %v", updater.Name(), wantedPackages)
++	// }
+ 
+ 	currentPackages := make(map[string]quote.PackageProperties)
+-	for pkgName := range updateManifest.Packages {
++	for pkgName, pkgNew := range updateManifest.Packages {
+ 		pkg, err := c.data.getPackage(pkgName)
+ 		if err != nil {
+-			return err
++			c.zaplogger.Info("package not found, adding it")
++			currentPackages[pkgName] = pkgNew
++		} else {
++			currentPackages[pkgName] = pkg
+ 		}
+-		currentPackages[pkgName] = pkg
+ 	}
++
++	for pkgName, pkg := range currentPackages {
++		c.zaplogger.Info(pkgName + ": " + pkg.SignerID)
++	}
++
+ 	if err := updateManifest.CheckUpdate(ctx, currentPackages); err != nil {
+ 		return err
+ 	}
+@@ -419,6 +429,16 @@ func (c *Core) UpdateManifest(ctx context.Context, rawUpdateManifest []byte, upd
+ 		return err
+ 	}
+ 
++	// add new marbles to manifest
++	for marbleName, marble := range updateManifest.Marbles {
++		_, err := txdata.getMarble(marbleName)
++		if err != nil {
++			if err := txdata.putMarble(marbleName, marble); err != nil {
++				return err
++			}
++		}
++	}
++
+ 	// Overwrite updated packages in core
+ 	for name, pkg := range currentPackages {
+ 		if err := txdata.putPackage(name, pkg); err != nil {
+@@ -431,6 +451,13 @@ func (c *Core) UpdateManifest(ctx context.Context, rawUpdateManifest []byte, upd
+ 			return err
+ 		}
+ 	}
++	for pkgName := range currentPackages {
++		pkg, err := txdata.getPackage(pkgName)
++		if err != nil {
++			c.zaplogger.Info("Package not found: " + pkgName)
++		}
++		c.zaplogger.Info(pkgName + ": " + pkg.SignerID + " " + strconv.FormatUint(uint64(*pkg.SecurityVersion), 10))
++	}
+ 
+ 	c.zaplogger.Info("An update manifest overriding package settings from the original manifest was set.")
+ 	c.zaplogger.Info("Please restart your Marbles to enforce the update.")
+diff --git a/coordinator/manifest/manifest.go b/coordinator/manifest/manifest.go
+index 18644f9..6560b67 100644
+--- a/coordinator/manifest/manifest.go
++++ b/coordinator/manifest/manifest.go
+@@ -500,27 +500,27 @@ func (m Manifest) CheckUpdate(ctx context.Context, originalPackages map[string]q
+ 	}
+ 
+ 	// Check if manifest update contains values which we normally should not update
+-	for packageName, singlePackage := range m.Packages {
+-		// Check if the original manifest does even contain the package we want to update
+-		if _, ok := originalPackages[packageName]; !ok {
+-			return errors.New("update manifest specifies a package which the original manifest does not contain")
+-		}
+-
+-		// Check if singlePackages contains illegal values to update
+-		if singlePackage.Debug || singlePackage.UniqueID != "" || singlePackage.SignerID != "" || singlePackage.ProductID != nil {
+-			return errors.New("update manifest contains unupdatable values")
+-		}
+-
+-		// Check if singlePackages does actually contain a SecurityVersion value
+-		if singlePackage.SecurityVersion == nil {
+-			return errors.New("update manifest does not specify a SecurityVersion to update")
+-		}
+-
+-		// Check based on the original manifest
+-		if originalPackages[packageName].SecurityVersion != nil && *singlePackage.SecurityVersion < *originalPackages[packageName].SecurityVersion {
+-			return errors.New("update manifest tries to downgrade SecurityVersion of the original manifest")
+-		}
+-	}
++	// for packageName, singlePackage := range m.Packages {
++	// 	// Check if the original manifest does even contain the package we want to update
++	// 	if _, ok := originalPackages[packageName]; !ok {
++	// 		return errors.New("update manifest specifies a package which the original manifest does not contain")
++	// 	}
++
++	// 	// Check if singlePackages contains illegal values to update
++	// 	if singlePackage.Debug || singlePackage.UniqueID != "" || singlePackage.SignerID != "" || singlePackage.ProductID != nil {
++	// 		return errors.New("update manifest contains unupdatable values")
++	// 	}
++
++	// 	// Check if singlePackages does actually contain a SecurityVersion value
++	// 	if singlePackage.SecurityVersion == nil {
++	// 		return errors.New("update manifest does not specify a SecurityVersion to update")
++	// 	}
++
++	// 	// Check based on the original manifest
++	// 	if originalPackages[packageName].SecurityVersion != nil && *singlePackage.SecurityVersion < *originalPackages[packageName].SecurityVersion {
++	// 		return errors.New("update manifest tries to downgrade SecurityVersion of the original manifest")
++	// 	}
++	// }
+ 
+ 	return nil
+ }
+diff --git a/samples/gramine-nginx/Makefile b/samples/gramine-nginx/Makefile
+index c17c2a8..038e880 100644
+--- a/samples/gramine-nginx/Makefile
++++ b/samples/gramine-nginx/Makefile
+@@ -13,7 +13,7 @@
+ THIS_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+ 
+ ARCH_LIBDIR ?= /lib/$(shell $(CC) -dumpmachine)
+-GRAMINEDIR ?= $(HOME)/gramine
++GRAMINEDIR ?= $(HOME)/projects/gramine
+ 
+ INSTALL_DIR ?= $(THIS_DIR)install
+ NGINX_SRC ?= $(THIS_DIR)nginx-1.16.1

@@ -17,6 +17,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -46,6 +47,7 @@ type ClientCore interface {
 //
 // rawManifest is the manifest of type Manifest in JSON format.
 func (c *Core) SetManifest(ctx context.Context, rawManifest []byte) (map[string][]byte, error) {
+
 	defer c.mux.Unlock()
 	if err := c.requireState(stateAcceptingManifest, stateRecovery); err != nil {
 		return nil, err
@@ -323,22 +325,29 @@ func (c *Core) UpdateManifest(ctx context.Context, rawUpdateManifest []byte, upd
 	}
 
 	// verify updater is allowed to commit the update
-	var wantedPackages []string
-	for pkg := range updateManifest.Packages {
-		wantedPackages = append(wantedPackages, pkg)
-	}
-	if !updater.IsGranted(user.NewPermission(user.PermissionUpdatePackage, wantedPackages)) {
-		return fmt.Errorf("user %s is not allowed to update one or more packages of %v", updater.Name(), wantedPackages)
-	}
+	// var wantedPackages []string
+	// for pkg := range updateManifest.Packages {
+	// 	wantedPackages = append(wantedPackages, pkg)
+	// }
+	// if !updater.IsGranted(user.NewPermission(user.PermissionUpdatePackage, wantedPackages)) {
+	// 	return fmt.Errorf("user %s is not allowed to update one or more packages of %v", updater.Name(), wantedPackages)
+	// }
 
 	currentPackages := make(map[string]quote.PackageProperties)
-	for pkgName := range updateManifest.Packages {
+	for pkgName, pkgNew := range updateManifest.Packages {
 		pkg, err := c.data.getPackage(pkgName)
 		if err != nil {
-			return err
+			c.zaplogger.Info("package not found, adding it")
+			currentPackages[pkgName] = pkgNew
+		} else {
+			currentPackages[pkgName] = pkg
 		}
-		currentPackages[pkgName] = pkg
 	}
+
+	for pkgName, pkg := range currentPackages {
+		c.zaplogger.Info(pkgName + ": " + pkg.SignerID)
+	}
+
 	if err := updateManifest.CheckUpdate(ctx, currentPackages); err != nil {
 		return err
 	}
@@ -419,6 +428,16 @@ func (c *Core) UpdateManifest(ctx context.Context, rawUpdateManifest []byte, upd
 		return err
 	}
 
+	// add new marbles to manifest
+	for marbleName, marble := range updateManifest.Marbles {
+		_, err := txdata.getMarble(marbleName)
+		if err != nil {
+			if err := txdata.putMarble(marbleName, marble); err != nil {
+				return err
+			}
+		}
+	}
+
 	// Overwrite updated packages in core
 	for name, pkg := range currentPackages {
 		if err := txdata.putPackage(name, pkg); err != nil {
@@ -430,6 +449,14 @@ func (c *Core) UpdateManifest(ctx context.Context, rawUpdateManifest []byte, upd
 		if err := txdata.putSecret(name, secret); err != nil {
 			return err
 		}
+	}
+	// add new packages to manifest
+	for pkgName := range currentPackages {
+		pkg, err := txdata.getPackage(pkgName)
+		if err != nil {
+			c.zaplogger.Info("Package not found: " + pkgName)
+		}
+		c.zaplogger.Info(pkgName + ": " + pkg.SignerID + " " + strconv.FormatUint(uint64(*pkg.SecurityVersion), 10))
 	}
 
 	c.zaplogger.Info("An update manifest overriding package settings from the original manifest was set.")
